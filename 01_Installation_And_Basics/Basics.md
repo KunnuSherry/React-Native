@@ -100,4 +100,203 @@ import { Image } from 'expo-image';
 
 ---
 
-*Happy coding! 🎉*
+## 🔗 Navigation with Expo Router
+
+Expo Router provides several ways to navigate between screens.
+
+### `<Link>` Component
+The `<Link>` component works like an anchor tag — it navigates to a route on press.
+
+```tsx
+import { Link } from "expo-router";
+
+<Link href="/about">Go to About</Link>
+```
+
+---
+
+### `_layout.tsx` — Stack Navigator
+`_layout.tsx` defines the **header and navigation structure** of your screens. It controls animations, header styles, and which screens are included in the stack.
+
+```tsx
+import { Stack } from "expo-router";
+
+export default function RootLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerStyle: { backgroundColor: "#6200EE" },
+        headerTintColor: "white",
+        animation: "slide_from_right",
+      }}
+    >
+      <Stack.Screen name="index" options={{ headerShown: true, title: "Home" }} />
+      <Stack.Screen name="about" options={{ headerShown: true, title: "About" }} />
+    </Stack>
+  );
+}
+```
+
+> 💡 **Stack** keeps a navigation history — pressing back returns to the previous screen.
+
+---
+
+### `useRouter()` Hook
+`useRouter()` lets you navigate programmatically from any component, e.g. on a button press.
+
+```tsx
+import { useRouter } from "expo-router";
+
+const router = useRouter();
+
+// Navigate to a screen
+router.push("/about");
+
+// Go back to the previous screen
+router.back();
+
+// Replace current screen (no back history)
+router.replace("/home");
+```
+
+---
+
+### Button Navigation
+
+```tsx
+import { Button } from "react-native";
+import { useRouter } from "expo-router";
+
+const router = useRouter();
+
+<Button title="Go to About" onPress={() => router.push("/about")} />
+```
+
+---
+
+## 🗂️ Tab Navigator
+
+Tabs provide a **bottom navigation bar** with icons. Here's how to set it up:
+
+1. Create a `(tabs)/` folder inside `app/` and move all tab screen files there.
+2. In the root `_layout.tsx`, add a single `Stack.Screen` pointing to `(tabs)`.
+3. Create a separate `_layout.tsx` inside `(tabs)/` for the tab configuration.
+
+```tsx
+import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+
+export default function TabsLayout() {
+  return (
+    <Tabs screenOptions={{ tabBarActiveTintColor: "crimson" }}>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Home",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "home" : "home-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="about"
+        options={{
+          title: "About",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "information-circle" : "information-circle-outline"}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "person" : "person-outline"} size={24} color={color} />
+          ),
+        }}
+      />
+    </Tabs>
+  );
+}
+```
+
+---
+
+## 🎨 Expo UI Library (Native Components)
+
+`@expo/ui` provides **truly native UI components** backed by Jetpack Compose (Android) and SwiftUI (iOS). It requires a **development build** — it does not work in Expo Go.
+
+### Setup Steps
+
+1. **Install the package**
+   ```bash
+   npx expo install @expo/ui
+   ```
+
+2. **Configure NDK in `app.json`**
+   ```json
+   {
+     "expo": {
+       "android": {
+         "package": "com.yourname.appname"
+       }
+     }
+   }
+   ```
+
+3. **Prebuild the native project**
+   ```bash
+   npx expo prebuild
+   ```
+
+4. **Run on emulator** *(installs NDK and compiles native code — takes a while the first time)*
+   ```bash
+   npx expo run:android
+   ```
+
+5. **Run on a real device** *(via EAS cloud build)*
+   ```bash
+   eas build --platform android
+   ```
+
+6. **Start the dev server** *(after initial build — hot reload works normally)*
+   ```bash
+   npx expo start
+   ```
+
+### Using the Button Component
+
+> ⚠️ Every `@expo/ui` component **must** be wrapped in a `<Host>` component, and `Host` needs explicit `width` and `height` to be visible.
+
+```tsx
+import { View, StyleSheet } from "react-native";
+import { Host, Button } from "@expo/ui/jetpack-compose";
+import { useRouter } from "expo-router";
+
+export default function Index() {
+  const router = useRouter();
+
+  return (
+    <View style={styles.container}>
+      <Host style={{ width: 200, height: 60 }}>
+        <Button
+          variant="elevated"   // "elevated" | "outlined"
+          onPress={() => router.push("/profile")}
+        >
+          Go to Profile
+        </Button>
+      </Host>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: "center", alignItems: "center" },
+});
+```
+
