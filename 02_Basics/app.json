@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "02_BerealClone",
-    "slug": "02_BerealClone",
+    "name": "02_Basics",
+    "slug": "02_Basics",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "02berealclone",
+    "scheme": "02basics",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"

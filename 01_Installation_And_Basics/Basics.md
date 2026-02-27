@@ -300,3 +300,135 @@ const styles = StyleSheet.create({
 });
 ```
 
+---
+
+## ⬆️ Modal Bottom Sheet (Expo UI)
+
+Using `@expo/ui`’s Jetpack Compose components, you can show a **native Android modal bottom sheet**.
+
+> ⚠️ Works only in a **development build**, not in Expo Go.
+
+```tsx
+import React, { useState } from "react";
+import { View, StyleSheet } from "react-native";
+import { Host, Button, ModalBottomSheet, Column, Text } from "@expo/ui/jetpack-compose";
+import { paddingAll } from "@expo/ui/jetpack-compose/modifiers";
+
+export default function Profile() {
+  const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
+
+  return (
+    <View style={styles.container}>
+      <Host matchContents>
+        <Button variant="elevated" onPress={() => setIsBottomSheetOpen(true)}>
+          Open Bottom Sheet
+        </Button>
+
+        {isBottomSheetOpen && (
+          <ModalBottomSheet onDismissRequest={() => setIsBottomSheetOpen(false)}>
+            <Column
+              verticalArrangement={{ spacedBy: 12 }}
+              modifiers={[paddingAll(24)]}
+            >
+              <Text>Profile</Text>
+              <Text>This is the content of the bottom sheet.</Text>
+              <Button onPress={() => setIsBottomSheetOpen(false)}>
+                Close
+              </Button>
+            </Column>
+          </ModalBottomSheet>
+        )}
+      </Host>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: "center", alignItems: "center" },
+});
+```
+
+> 💡 `onDismissRequest` is called when the user swipes the sheet down or taps outside it — that’s where you close it by updating state.
+
+---
+
+## 🎨 Color Picker with `Picker`
+
+You can use the `Picker` component from `@expo/ui/jetpack-compose` as a simple **color picker** and bind it to text styling.
+
+```tsx
+import React, { useState } from "react";
+import { View, StyleSheet } from "react-native";
+import { Host, Picker, Text } from "@expo/ui/jetpack-compose";
+
+export default function ColorPickerExample() {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const colorLabels = ["Red", "Orange", "Green", "Blue"];
+  const colorValues = ["red", "orange", "green", "blue"];
+
+  return (
+    <View style={styles.container}>
+      <Host matchContents>
+        <Picker
+          options={colorLabels}
+          selectedIndex={selectedIndex}
+          onOptionSelected={({ nativeEvent: { index } }) => {
+            setSelectedIndex(index);
+          }}
+          variant="segmented"
+          color="#6200EE"
+        />
+
+        <Text color={colorValues[selectedIndex]}>
+          Profile
+        </Text>
+      </Host>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: "center", alignItems: "center" },
+});
+```
+
+> 🧠 Idea: Try binding the picker to other props (like background color) to build interactive theme demos.
+
+---
+
+## 🧠 Platform-Specific Logic
+
+React Native lets you run **platform-specific code** using the `Platform` API.
+
+```tsx
+import { Platform, Text, View } from "react-native";
+
+export default function PlatformExample() {
+  const message =
+    Platform.OS === "ios"
+      ? "Running on iOS 🍎"
+      : "Running on Android 🤖";
+
+  return (
+    <View>
+      <Text>{message}</Text>
+      {Platform.OS === "android" && (
+        <Text>This text only appears on Android.</Text>
+      )}
+    </View>
+  );
+}
+```
+
+Common checks:
+
+- **`Platform.OS === "ios"`** → iOS-only behavior
+- **`Platform.OS === "android"`** → Android-only behavior
+- **`Platform.select({ ios: ..., android: ... })`** → choose values per platform
+
+This is especially useful for:
+
+- Using different icons or layouts on iOS vs Android
+- Adjusting margins/paddings to match native design
+- Enabling features that only exist on one platform
