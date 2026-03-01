@@ -11,6 +11,7 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "permissions":["CAMERA", "READ_MEDIA_IMAGES"],
       "package": "com.bereal.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

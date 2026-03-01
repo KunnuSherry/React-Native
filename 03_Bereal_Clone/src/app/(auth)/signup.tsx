@@ -1,12 +1,43 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { Alert, View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {useRouter} from "expo-router"
+import { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+
 export default function SignUpScreen() {
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
+    const {signUp} = useAuth();
+
+    useEffect(() => {
+        router.replace("/(auth)/onboarding");
+    }, []);
+
+    const handleSignUp = async () =>{
+        if(!email || !password){
+            Alert.alert("Please fill in all fields");
+            return;
+        }
+        if(password.length < 6){
+            Alert.alert("Password must be at least 6 characters");
+            return;
+        }
+        setIsLoading(true);
+        try{
+            await signUp(email, password);
+            router.replace("/(tabs)/about");
+        }catch(error){
+            Alert.alert("Error", "Failed to sign up");
+        }finally{
+            setIsLoading(false);
+        }
+    }
     return (
         <SafeAreaView edges={["top", "bottom"]} style={styles.container}>
             <View style={styles.content}>
-                <Text style={styles.title}>Welcome</Text>
+                <Text style={styles.title}>Create an Account</Text>
                 <Text style={styles.subTitle}>Sign Up to Get Started</Text>
                 <View style={styles.form}>
                     <TextInput 
@@ -15,6 +46,8 @@ export default function SignUpScreen() {
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoComplete="email"
+                    onChangeText={setEmail}
+                    value={email}
                     style={styles.input}
                     />
                     <TextInput 
@@ -23,11 +56,13 @@ export default function SignUpScreen() {
                     autoCapitalize="none"
                     autoComplete="password"
                     secureTextEntry={true}
+                    onChangeText={setPassword}
+                    value={password}
                     style={styles.input}
                     />
 
-                    <TouchableOpacity style={styles.button}>
-                        <Text style={styles.buttonText}>Sign Up</Text>
+                    <TouchableOpacity style={styles.button} onPress={handleSignUp}>
+                        {isLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.buttonText}>Sign Up</Text>}
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.linkbutton} onPress={()=>{router.push("/(auth)/login")}}>

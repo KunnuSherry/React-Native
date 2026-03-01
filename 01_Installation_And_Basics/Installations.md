@@ -101,4 +101,36 @@ npx expo start
 
 ---
 
+## 🧪 Our Real-World Issue & Fix
+
+While building the **BeReal Clone** with **Expo + Supabase**, we hit two problems that are useful to remember:
+
+### 1. Supabase Auth + AsyncStorage error
+
+- **Symptom**: On the Android emulator, the app logged  
+  `AsyncStorageError: Native module is null, cannot access legacy storage` and signup failed.
+- **Cause**: `@supabase/supabase-js` uses the storage you pass in (`auth.storage`) to keep the auth session. In Expo/React Native, we passed `@react-native-async-storage/async-storage`, but on some dev builds / emulators the **native AsyncStorage module wasn’t available**, so every access crashed.
+- **Fix**: We kept using `AsyncStorage` as the storage implementation, but wrapped it in a tiny adapter that:
+  - Tries `AsyncStorage.getItem / setItem / removeItem` first.
+  - If the native module throws (e.g. on an emulator / Expo Go), it falls back to an in-memory store so Supabase Auth can still sign users up without crashing.
+
+> **Takeaway**: When wiring Supabase Auth in a React Native + Expo app, always think about **where sessions are stored** and handle the case where the AsyncStorage native module might not be ready in development.
+
+### 2. `npx expo run:android` failing with “Unable to delete directory”
+
+- **Symptom**: `npx expo run:android` failed on Windows with errors like:  
+  `Execution failed for task '...:generateDebugResValues'. Unable to delete directory ...\android\build\generated\res\resValues\debug`
+- **Cause**: Gradle was trying to clean `android/build` folders inside `node_modules`, but Windows (plus **OneDrive sync** and parallel Gradle tasks) was locking some of those directories.
+- **Fix**:
+  - Stopped Gradle daemons: `cd android && gradlew.bat --stop`.
+  - Manually deleted `android\build` and the `android\build` folders inside the affected `node_modules\...` packages.
+  - In `android/gradle.properties`, disabled parallel builds to reduce file-lock issues:
+    - `org.gradle.parallel=false`
+    - `org.gradle.workers.max=1`
+  - Re-ran `npx expo run:android`, which then completed successfully.
+
+> **Extra tip**: For fewer Windows file-lock issues, prefer placing projects **outside OneDrive**, e.g. `C:\dev\my-app`, before running native builds.
+
+---
+
 *You're all set — start building something amazing! 🚀*
