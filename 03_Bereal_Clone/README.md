@@ -391,3 +391,196 @@ Verify that:
 ---
 
 **Master real-world mobile app patterns and deploy to production! 🚀**
+
+---
+
+## 🗓️ Progress Update – Profiles, RLS & Onboarding
+
+This update introduces a **fully integrated profile system** backed by Supabase, including **row-level security (RLS)**, **storage policies for profile images**, and **completed signup/onboarding flows** on the frontend.
+
+### 1️⃣ Supabase `profiles` Table
+
+We created a table named **`public.profiles`** with the following columns:
+
+- **id**: `uuid`, primary key, references `auth.users.id` (1:1 with each authenticated user)
+- **created_at**: `timestamp` with default `now()`
+- **name**: `text`
+- **username**: `text`
+- **onboarding_completed**: `boolean`
+- **profile_image_url**: `text`
+
+Key points:
+
+- **1:1 link with users**: The `id` column is the same as `auth.users.id`, so every authenticated user has exactly one profile row.
+- **Row Level Security enabled**: RLS is turned on to ensure all access is filtered per user.
+- **Force RLS**: Even super roles must respect policies, preventing accidental leaks.
+
+```sql
+alter table public.profiles enable row level security;
+alter table public.profiles force row level security;
+```
+
+This guarantees that **all queries, inserts, updates, and selects** against `public.profiles` are governed by explicit security policies.
+
+### 2️⃣ RLS Policies for `profiles`
+
+We defined granular RLS policies to control how authenticated users can interact with profile rows.
+
+```sql
+-- Users can insert their own profile
+create policy "Users can insert their own profile"
+on public.profiles
+for insert
+to authenticated
+with check (auth.uid() = id);
+
+-- Users can update their own profile
+create policy "Users can update their own profile"
+on public.profiles
+for update
+to authenticated
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
+-- Users can view their own profile
+create policy "Users can view their own profile"
+on public.profiles
+for select
+to authenticated
+using (auth.uid() = id);
+
+-- Users can view other profiles
+create policy "Users can view other profiles"
+on public.profiles
+for select
+to authenticated
+using (auth.uid() <> id);
+```
+
+**Explanation:**
+
+- **Insert policy**: Only allows authenticated users to insert a profile row **where `id` equals `auth.uid()`**, preventing creation of profiles for other users.
+- **Update policy**: Users can only update a profile **if they own it** (`auth.uid() = id`) and the update continues to satisfy this condition.
+- **Self-select policy**: Allows each authenticated user to query **their own profile**.
+- **Other-select policy**: Allows authenticated users to **read other users’ public profiles**, enabling social features like viewing friends’ names, usernames, and avatars while still keeping writes locked down.
+
+Together, these policies ensure **safe self-service profile management** while still supporting social discovery.
+
+### 3️⃣ Trigger: Auto-Create Profile on Signup
+
+To avoid manual profile creation in the frontend, we added a **database trigger** that automatically creates a profile row whenever a new user is added to `auth.users`.
+
+```sql
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, name, username)
+  values (new.id, null, null);
+
+  return new;
+end;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_user();
+```
+
+**Explanation:**
+
+- Every time a new user signs up, `handle_new_user` runs and inserts a corresponding row in `public.profiles`.
+- `name` and `username` are initialized as `null` so they can be safely filled during onboarding.
+- The frontend does **not** need to create profile rows manually; it only **updates** the existing row, which plays nicely with the RLS policies above.
+
+### 4️⃣ Storage Bucket – Profile Images
+
+We added a Supabase Storage bucket named **`profiles`** to store user profile images.
+
+- **Bucket name**: `profiles`
+- **Usage**: Each user’s images live under a folder that matches their `auth.uid()`:
+  - `profiles/<user-id>/avatar.png`
+  - `profiles/<user-id>/profile.jpg`
+
+The core policy condition we rely on is:
+
+```sql
+(bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text)
+```
+
+This expression ensures that:
+
+- Access is restricted to the **`profiles`** bucket.
+- The **first folder segment** in the object path (obtained via `storage.foldername(name)[1]`) **must equal the user’s `auth.uid()`**.
+- Users can only interact with files inside `/profiles/<their-user-id>/...`.
+
+We applied this pattern consistently across all storage policies:
+
+```sql
+-- Allow users to upload to their own folder
+((bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))
+
+-- Allow users to update their own files
+((bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))
+
+-- Allow users to delete their own files
+((bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))
+
+-- Allow users to view their own files
+((bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))
+
+-- Allow public read access (if enabled)
+(bucket_id = 'profiles'::text)
+
+-- Restrict access strictly to user folder
+(bucket_id = 'profiles'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text)
+```
+
+**Explanation:**
+
+- **Per-user isolation**: Upload, update, delete, and view policies are all scoped so users can only manage files in their own `<auth.uid()>` folder.
+- **Optional public reads**: A separate policy can allow `select` access on `(bucket_id = 'profiles')` for public avatars, while still keeping write operations user-specific.
+- **Defense in depth**: The repeated folder check ensures any access to objects under `profiles` is **always** filtered by the user’s ID.
+
+### 5️⃣ Frontend: Signup, Onboarding & Profile Updates
+
+On the frontend, the **signup** and **onboarding** flows are now fully wired into Supabase Auth, the `profiles` table, and the `profiles` storage bucket.
+
+- **`signup.tsx`**
+  - Handles email/password registration.
+  - Calls `signUp` from `AuthContext` and, on success, navigates the user to the onboarding screen.
+  - Validates inputs and surfaces failure states via alerts.
+
+- **`onboarding.tsx`**
+  - Allows the user to:
+    - Pick or capture a profile picture.
+    - Enter **Full Name** and **Username**.
+  - Uploads the image to the `profiles` storage bucket under `<auth.uid()>`.
+  - Checks that the chosen username is unique (excluding the current user).
+  - Marks `onboarding_completed` as `true` when finished and redirects to the main `(tabs)` experience.
+
+#### Safe, Partial Profile Updates
+
+Profile updates are performed via the `updateUser` function in `AuthContext`, which only sends fields that are explicitly defined:
+
+```ts
+if (userData.name !== undefined) updateData.name = userData.name;
+if (userData.username !== undefined)
+  updateData.username = userData.username;
+if (userData.profileImage !== undefined)
+  updateData.profile_image_url = userData.profileImage;
+if (userData.onboardingCompleted !== undefined)
+  updateData.onboarding_completed = userData.onboardingCompleted;
+```
+
+**Why this matters:**
+
+- **Prevents accidental data loss**: Existing columns are **not overwritten with `NULL` or `undefined`** when a field is omitted from an update.
+- **Supports incremental onboarding**: Users can update only their name, only their username, or only the image without touching other fields.
+- **Aligns with RLS**: Because we only update the row the user owns and send minimal data, we stay within the boundaries of our RLS policies.
+
+Overall, this release brings the project much closer to a **production-ready authentication and profile system**, with strong security guarantees and a smooth onboarding UX.

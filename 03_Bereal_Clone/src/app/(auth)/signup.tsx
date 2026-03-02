@@ -11,9 +11,6 @@ export default function SignUpScreen() {
     const router = useRouter();
     const {signUp} = useAuth();
 
-    useEffect(() => {
-        router.replace("/(auth)/onboarding");
-    }, []);
 
     const handleSignUp = async () =>{
         if(!email || !password){
@@ -27,8 +24,9 @@ export default function SignUpScreen() {
         setIsLoading(true);
         try{
             await signUp(email, password);
-            router.replace("/(tabs)/about");
+            router.push("/(auth)/onboarding");
         }catch(error){
+            console.error("Error signing up", error);
             Alert.alert("Error", "Failed to sign up");
         }finally{
             setIsLoading(false);

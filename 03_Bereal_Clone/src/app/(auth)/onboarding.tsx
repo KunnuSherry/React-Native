@@ -4,17 +4,101 @@ import {useRouter} from "expo-router"
 import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { uploadProfileImage } from "@/lib/supabase/storage";
+import { supabase } from "@/lib/supabase/client";
 
 export default function OnboardingScreen() {
     const router = useRouter();
-    const {user} = useAuth();
+    const {user, updateUser} = useAuth();
     const [name, setName] = useState("");
     const [username, setUsername] = useState("");
     const [image, setImage] = useState<string | null>(null);
 
     const [isLoading, setIsLoading] = useState(false);
-    const handleComplete = async () =>{
 
+
+    const takePhoto = async () =>{
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== "granted") {
+            Alert.alert("Permission Denied", "We need camera permission to access your photos");
+            return;
+        }
+
+        const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: false,
+            quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+            setImage(result.assets[0].uri);
+        }
+    }
+    const showImagePicker = () =>{
+        Alert.alert("Select Profile Picture", "Choose from gallery or take a photo", [
+            {text: "Cancel", style: "cancel"},
+            {text: "Choose from gallery", onPress: pickImage},
+            {text: "Take a photo", onPress: takePhoto},
+        ]);
+    }
+    const handleComplete = async () => {
+        if (!name || !username || !image) {
+            Alert.alert("Please fill in all fields");
+            return;
+        }
+
+        if (!user) {
+            Alert.alert("Error", "User not found. Please sign in again.");
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            // Check if username is already taken (excluding current user)
+            const { data: existingUser, error: usernameError } = await supabase
+                .from("Profiles")
+                .select("id")
+                .eq("username", username)
+                .neq("id", user.id)
+                .maybeSingle();
+
+            if (usernameError) {
+                console.error("Error checking username availability", usernameError);
+                throw usernameError;
+            }
+
+            if (existingUser) {
+                Alert.alert("Username already taken");
+                return;
+            }
+
+            let profileImageUrl: string | undefined;
+
+            // Upload profile picture to Supabase Storage
+            if (image) {
+                try {
+                    profileImageUrl = await uploadProfileImage(user.id, image);
+                } catch (error) {
+                    console.error("Error uploading profile picture", error);
+                    Alert.alert("Error", "Failed to upload profile picture");
+                    return;
+                }
+            }
+
+            // Update user profile in Supabase
+            await updateUser({
+                name,
+                username,
+                profileImage: profileImageUrl,
+                onboardingCompleted: true,
+            });
+
+            router.replace("/(tabs)");
+        } catch (error) {
+            Alert.alert("Error", "Failed to complete onboarding");
+            console.error("Error completing onboarding", error);
+        } finally {
+            setIsLoading(false);
+        }
     }
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -44,7 +128,7 @@ export default function OnboardingScreen() {
                 </View>
 
                 <View style={styles.form}>
-                    <TouchableOpacity style={styles.imageContainer} onPress={pickImage}>
+                    <TouchableOpacity style={styles.imageContainer} onPress={showImagePicker}>
                         {image ? (
                             <Image
                                 source={{ uri: image }}
