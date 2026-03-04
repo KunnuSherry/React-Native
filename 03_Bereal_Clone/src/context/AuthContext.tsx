@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useState } from "react";
 
@@ -13,6 +13,8 @@ export interface User {
 
 interface AuthContextType {
     user: User | null;
+    isLoading: boolean;
+    signIn : (email: string, password:string) => Promise<void>;
     signUp: (email: string, password: string) => Promise<void>;
     updateUser: (userData: Partial<User>) => Promise<void>;
 }
@@ -21,6 +23,38 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({children}: {children: React.ReactNode}) =>{
     const [user, setUser] = useState<User | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(()=>{
+        (async () => {
+            setIsLoading(true);
+            try {
+                await checkSession();
+            } finally {
+                setIsLoading(false);
+            }
+        })();
+    }, [])
+
+    const checkSession = async()=>{
+        try{
+            const {
+                data: {session},
+            } = await supabase.auth.getSession();
+            if(session?.user){
+                const profile = await fetchUserProfile(session.user.id);
+                setUser(profile);
+            }
+            else{
+                setUser(null);
+            }
+        }catch(error){
+            console.error(error);
+            setUser(null);
+            throw error;
+
+        }
+    }
     const fetchUserProfile = async(userId : string): Promise<User | null> =>{
         try{
             const {data, error} = await supabase.from("Profiles").select("*").eq("id", userId).single();
@@ -51,7 +85,20 @@ export const AuthProvider = ({children}: {children: React.ReactNode}) =>{
         }
     }
     const signIn = async(email: string, password: string) =>{
-        
+        const {data, error} = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+        if(error){
+            throw error;
+        }
+        if(data.user){
+            console.log("User signed up successfully", data.user);
+            const userProfile = await fetchUserProfile(data.user.id);
+            if(userProfile){
+                setUser(userProfile);
+            }
+        }
     }
     const signUp = async(email: string, password: string) =>{
         const {data, error} = await supabase.auth.signUp({
@@ -90,7 +137,7 @@ export const AuthProvider = ({children}: {children: React.ReactNode}) =>{
             throw error;
         }
     };
-    return <AuthContext.Provider value={{user, signUp, updateUser}}>{children}</AuthContext.Provider>;
+    return <AuthContext.Provider value={{user, isLoading, signUp, updateUser, signIn}}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () =>{

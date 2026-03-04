@@ -584,3 +584,158 @@ if (userData.onboardingCompleted !== undefined)
 - **Aligns with RLS**: Because we only update the row the user owns and send minimal data, we stay within the boundaries of our RLS policies.
 
 Overall, this release brings the project much closer to a **production-ready authentication and profile system**, with strong security guarantees and a smooth onboarding UX.
+
+### 6️⃣ Additional Frontend & Utility Work (Today)
+
+This section documents the extra pieces wired up today and how they fit into the overall architecture.
+
+#### 6.1 Expo File System (`File`) in `storage.ts`
+
+- **Use case**: Read a local image file (from camera or gallery) as binary data so it can be uploaded directly to Supabase Storage.
+- **Why we used it**: Supabase Storage expects raw bytes (`ArrayBuffer`/`Uint8Array`) when uploading files. The `File` API from `expo-file-system` gives us a simple way to turn a local URI (e.g. `file:///...`) into an object we can read as an `arrayBuffer`.
+- **How it’s used**: In `src/lib/supabase/storage.ts`, we construct a `File` from the `imageUri`, read its `arrayBuffer`, and pass that buffer to `supabase.storage.from("profiles").upload(...)`.
+
+```12:20:src/lib/supabase/storage.ts
+const file = new File(imageUri);
+const arrayBuffer = await file.arrayBuffer();
+
+const { error } = await supabase.storage
+  .from("profiles")
+  .upload(fileName, arrayBuffer, {
+    contentType: `image/${fileExtension}`,
+    upsert: true,
+  });
+```
+
+#### 6.2 Login Page (`login.tsx`)
+
+- **Use case**: Allow existing users to sign into the app using email and password.
+- **Why we used it**: The login screen is the entry point for returning users and ties into `AuthContext` and Supabase Auth, so the rest of the app can be protected behind the auth flow.
+- **How it’s used**: `login.tsx` renders `TextInput` fields for email and password, uses `secureTextEntry` to hide the password, and calls `signIn` from `useAuth()` (once wired) to authenticate the user. It also provides navigation to the signup screen for new users.
+
+#### 6.3 `checkSession` / “CheckUser” in `AuthContext`
+
+- **Use case**: On app start, determine whether there is an existing Supabase session and, if so, load the user’s profile.
+- **Why we used it**: Without a session check, users would have to log in every time they open the app. `checkSession` lets us restore the authenticated state and keep the UI in sync with Supabase.
+- **How it’s used**: In `AuthProvider`, an `useEffect` runs once on mount and calls `checkSession`, which in turn uses `supabase.auth.getSession()` and `fetchUserProfile` to populate the `user` state.
+
+```39:47:src/context/AuthContext.tsx
+const checkSession = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (session?.user) {
+    const profile = await fetchUserProfile(session.user.id);
+    setUser(profile);
+  } else {
+    setUser(null);
+  }
+};
+```
+
+#### 6.4 `RouteGuard` in `_layout.tsx`
+
+- **Use case**: Central place to protect routes and redirect users based on whether they are authenticated.
+- **Why we used it**: Instead of sprinkling auth checks inside every screen, `RouteGuard` wraps the whole app and decides whether the user should be on `(auth)` routes or `(tabs)` routes.
+- **How it’s used**: `RouteGuard` reads `user` and `isLoading` from `useAuth()` and uses `router.replace` to move users to `/ (auth)/login` when logged out, or to `/(tabs)` when logged in.
+
+```6:26:src/app/_layout.tsx
+function RouteGuard() {
+  const router = useRouter();
+  const { user, isLoading } = useAuth();
+  const segments = useSegments();
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!user && segments[0] !== "(auth)") {
+      router.replace("/(auth)/login");
+    } else if (user && segments[0] !== "(tabs)") {
+      router.replace("/(tabs)");
+    }
+  }, [user, segments, router, isLoading]);
+
+  // Renders the main Stack when not loading
+}
+```
+
+#### 6.5 `useSegments` (Segments) in `_layout.tsx`
+
+- **Use case**: Detect which top-level route group (`(auth)` or `(tabs)`) the user is currently in.
+- **Why we used it**: `useSegments` from `expo-router` gives us access to the current route path broken into segments, which is perfect for building route guards and redirect logic.
+- **How it’s used**: We read `const segments = useSegments();` and then check `segments[0]` to see whether we are in auth screens or tab screens, and only redirect when necessary.
+
+```9:13:src/app/_layout.tsx
+const segments = useSegments();
+
+const isAuth = segments[0] === "(auth)";
+const isTabs = segments[0] === "(tabs)";
+```
+
+#### 6.6 `NativeTabs` in `(tabs)/_layout.tsx`
+
+- **Use case**: Provide a fast, native-feeling bottom tab navigation for the main app using Expo Router’s `NativeTabs` (supports effects like “liquid glass” navigation on supported platforms).
+- **Why we used it**: `NativeTabs` offers better platform integration and performance than plain JS tab bars, and it integrates directly with Expo Router’s file-based routing.
+- **How it’s used**: In `src/app/(tabs)/_layout.tsx`, we declare a `NativeTabs` component with `Trigger`s for each screen (`index`, `profile`) and give them labels and icons.
+
+```4:16:src/app/(tabs)/_layout.tsx
+export default function TabsLayout() {
+  return (
+    <NativeTabs>
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="person.fill" md="person" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  );
+}
+```
+
+#### 6.7 Modal in `index.tsx` (Post Preview)
+
+- **Use case**: Let users pick or capture a photo, preview it, optionally add a description, and then post it.
+- **Why we used it**: This mirrors the BeReal interaction pattern where you stage your post in a modal-like preview before sharing it, while keeping the main screen clean.
+- **How it’s used**: `index.tsx` uses React Native’s `Modal` plus `expo-image-picker` to show a centered card with the selected image, a multiline description input, and `Cancel` / `Post` actions.
+
+```71:104:src/app/(tabs)/index.tsx
+<Modal visible={showPreview} transparent animationType="fade">
+  <View style={styles.modalContainer}>
+    <View style={styles.modalContent}>
+      <Text style={styles.modalTitle}>Preview Your Post</Text>
+      {previewImage && (
+        <Image style={styles.previewImage} source={{ uri: previewImage }} contentFit="cover" />
+      )}
+
+      <TextInput
+        placeholder="Add a description (optional)"
+        value={description}
+        onChangeText={setDescription}
+        multiline
+      />
+      {/* Cancel / Post buttons */}
+    </View>
+  </View>
+</Modal>
+```
+
+#### 6.8 Home `index.tsx` Page
+
+- **Use case**: Act as the main entry point inside the `(tabs)` group, giving users a floating action button (FAB) to start creating a new post.
+- **Why we used it**: This page ties together camera/gallery access, modal previews, and future post submission logic, forming the backbone of the core BeReal-like posting experience.
+- **How it’s used**: `index.tsx` renders a `SafeAreaView` with a styled FAB in the bottom-right corner; tapping it opens an `Alert` to choose between gallery or camera, then shows the preview modal described above.
+
+```62:69:src/app/(tabs)/index.tsx
+<SafeAreaView style={styles.container} edges={["bottom", "top"]}>
+  <TouchableOpacity style={styles.fab} onPress={showImagePicker}>
+    <Text style={styles.fabText}>+</Text>
+  </TouchableOpacity>
+
+  {/* Modal preview for the selected image and description */}
+</SafeAreaView>
+```
