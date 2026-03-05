@@ -739,3 +739,176 @@ export default function TabsLayout() {
   {/* Modal preview for the selected image and description */}
 </SafeAreaView>
 ```
+
+### 7️⃣ Posts Table, RLS Policies & Feed Implementation
+
+This section documents the **server-side posts setup** and how the **frontend feed** is wired using `date-helper.ts`, `usePosts.ts`, and `(tabs)/index.tsx`.
+
+#### 7.1 Posts Table & Foreign Key to Profiles
+
+We added a `posts` table that is linked to the user’s profile via a foreign key:
+
+- **Table**: `posts`
+- **Key columns**:
+  - `id` – primary key
+  - `user_id` – `uuid`, references `"Profiles".id`
+  - `image_url` – `text`
+  - `description` – `text` (nullable)
+  - `expired_at` – `timestamptz` (when the post stops being active)
+  - `created_at` – `timestamptz` (default `now()`)
+  - `is_active` – `boolean`
+
+The important relationship is:
+
+- Each **post** belongs to **one profile** (`user_id → "Profiles".id`)
+- In Supabase this is modeled with a **foreign key** from `posts.user_id` to `"Profiles".id`, which also enables typed joins from the frontend.
+
+#### 7.2 RLS Policies for `posts`, `"Profiles"` & `post-images` Storage
+
+We enabled **Row Level Security (RLS)** on both `posts` and `"Profiles"` and added policies to ensure users can only manage their own content while still being able to view others’ posts and profiles.
+
+```sql
+-- Enable RLS
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "Profiles" ENABLE ROW LEVEL SECURITY;
+
+--------------------------------------------------
+-- POSTS TABLE POLICIES
+--------------------------------------------------
+
+-- Users can create their own posts
+CREATE POLICY "Users can create posts"
+ON posts
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
+
+-- Anyone logged in can view posts
+CREATE POLICY "Anyone can view posts"
+ON posts
+FOR SELECT
+TO authenticated
+USING (true);
+
+-- Users can update their own posts
+CREATE POLICY "Users can update their posts"
+ON posts
+FOR UPDATE
+TO authenticated
+USING (auth.uid() = user_id);
+
+-- Users can delete their own posts
+CREATE POLICY "Users can delete their posts"
+ON posts
+FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);
+
+--------------------------------------------------
+-- PROFILES TABLE POLICIES
+--------------------------------------------------
+
+-- Anyone can view profiles
+CREATE POLICY "Profiles are viewable by everyone"
+ON "Profiles"
+FOR SELECT
+USING (true);
+
+-- Users can insert their own profile
+CREATE POLICY "Users can insert their profile"
+ON "Profiles"
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = id);
+
+-- Users can update their own profile
+CREATE POLICY "Users can update their profile"
+ON "Profiles"
+FOR UPDATE
+TO authenticated
+USING (auth.uid() = id);
+
+--------------------------------------------------
+-- STORAGE POLICIES (for post-images bucket)
+--------------------------------------------------
+
+-- Allow users to upload images
+CREATE POLICY "Users can upload their images"
+ON storage.objects
+FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid()::text = (storage.foldername(name))[1]);
+
+-- Allow everyone to view images
+CREATE POLICY "Anyone can view images"
+ON storage.objects
+FOR SELECT
+USING (true);
+```
+
+**What this gives us:**
+
+- Only **authenticated users** can create posts, and each post is tied to the currently logged-in user.
+- Any authenticated user can **view posts** and **profiles**, which powers the social feed.
+- Users can **only modify or delete their own posts** and **only update their own profile**.
+- Storage policies ensure that users only upload to folders matching their `auth.uid()` while allowing everyone to read shared images from the `post-images` bucket.
+
+#### 7.3 `src/lib/date-helper.ts` – Post Time Helpers
+
+To present user-friendly timestamps in the feed, we introduced `src/lib/date-helper.ts`:
+
+- **`formatTimeAgo(createdAt: string)`**
+  - Converts an ISO timestamp to labels like `"Just Now"`, `"5m ago"`, `"3h ago"` or `"2d ago"`.
+  - Used for the small subtitle under each post to show when it was created.
+- **`formatTimeRemaining(expiresAt: string)`**
+  - Calculates how much time is left before a post expires (e.g. `"1h 20m left"`, `"15m left"`, or `"Expired"`).
+  - Internally uses a `parseUTC` helper that normalizes timestamps so they are treated as UTC even if the `Z` suffix is missing.
+
+These helpers keep all time math in one place and make the UI text consistent across the app.
+
+#### 7.4 `src/hooks/usePosts.ts` – Posts Hook
+
+The `usePosts` hook encapsulates **all post-related logic** for the home feed:
+
+- **Types**
+  - `PostUser` – minimal profile info (`id`, `name`, `username`, `profile_image_url?`).
+  - `Post` – a post row (`id`, `user_id`, `image_url`, `description`, `expired_at`, `created_at`, `is_active`) plus an optional `profiles` object for the joined profile.
+- **`loadPosts`**
+  - Queries Supabase:
+    - `from("posts").select("*, Profiles(id, name, username, profile_image_url)")`
+    - `eq("is_active", true)` – only active posts
+    - `gt("expired_at", new Date().toISOString())` – hide expired posts
+    - `order("expired_at", { ascending: false })` – soonest-expiring first
+  - Maps each row so the joined profile is available on `post.profiles`.
+- **`createPost(imageUri: string, description?: string)`**
+  - Uses `uploadPostImage(user.id, imageUri)` to upload the image to Supabase Storage.
+  - Creates a row in `posts` with:
+    - `user_id` – current user
+    - `image_url` – storage URL
+    - `description` – optional text
+    - `expired_at` – `now + 24 hours`
+    - `is_active: true`
+
+Because `usePosts` lives in a hook, the UI layer stays focused on rendering and user interactions, while data fetching and mutations remain testable and reusable.
+
+#### 7.5 `(tabs)/index.tsx` – BeReal-Style Feed Screen
+
+The `src/app/(tabs)/index.tsx` screen now serves as the **BeReal-style feed and post composer**:
+
+- **Feed rendering**
+  - Uses `usePosts()` to get `posts` and maps them into a `FlatList`.
+  - Each item is rendered via a `PostCard`:
+    - Shows avatar or initials from `post.profiles`.
+    - Displays `"You"` for your own posts and `@username` for others.
+    - Uses `formatTimeAgo(post.created_at)` and `formatTimeRemaining(post.expired_at)` for timestamps.
+- **Post composer**
+  - Floating **`+` FAB** in the bottom-right opens an alert to pick:
+    - **Gallery** (`launchImageLibraryAsync`)
+    - **Camera** (`launchCameraAsync`)
+  - Selected image opens a **preview modal** with:
+    - Large square preview
+    - Multiline description field (optional)
+    - **Cancel** and **Post** actions
+  - Tapping **Post** calls `createPost(previewImage, description)` from `usePosts`, then resets local state and hides the modal.
+
+Together, the `posts` table + RLS policies, `usePosts` hook, `date-helper` utilities, and `(tabs)/index.tsx` screen implement a secure, time-limited BeReal-style posting experience fully backed by Supabase.

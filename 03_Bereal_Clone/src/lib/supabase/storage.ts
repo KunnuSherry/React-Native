@@ -32,3 +32,27 @@ export const uploadProfileImage = async (userId: string, imageUri: string) => {
     throw error;
   }
 };
+
+export const uploadPostImage = async (userId: string, imageUri: string) => {
+  const cleanUri = imageUri.split("?")[0];
+  const fileExtension = cleanUri.split(".").pop() || "jpg";
+
+  const fileName = `${userId}/${Date.now()}.${fileExtension}`;
+
+  const file = new File(imageUri);
+  const arrayBuffer = await file.arrayBuffer();
+
+  const { error } = await supabase.storage
+    .from("posts")
+    .upload(fileName, arrayBuffer, {
+      contentType: `image/${fileExtension}`,
+    });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage
+    .from("posts")
+    .getPublicUrl(fileName);
+
+  return data.publicUrl;
+};
